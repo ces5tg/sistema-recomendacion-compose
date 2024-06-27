@@ -1,0 +1,149 @@
+
+services:
+  recoleccion:
+    build: 
+      context: ./recoleccion
+      target: dev
+    depends_on:
+      redis-slave1:
+        condition: service_started
+      kafka-broker-1:
+        condition: service_healthy
+      worker:
+        condition: service_started
+    healthcheck: 
+      test: ["CMD", "curl", "-f", "http://localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    volumes:
+     - ./recoleccion:/usr/local/app
+    ports:
+      - "3400:3400"
+    networks:
+      - miRed
+      
+  procesamiento:
+    build: 
+      context: ./procesamiento
+      target: dev
+    depends_on:
+      redis:
+        condition: service_healthy
+      worker:
+        condition: service_started
+      kafka-broker-1:
+        condition: service_healthy
+      redis-slave1:
+        condition: service_started
+    healthcheck: 
+      test: ["CMD", "curl", "-f", "http://localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    volumes:
+     - ./procesamiento:/usr/local/app
+    ports:
+      - "5050:5050"
+    networks:
+      - miRed
+      #++++++++++++++++++++++++++++++++++++++++++++++++++++
+  redis:
+    image: redis:6
+    command: ["redis-server", "--port", "6379", "--maxmemory", "1GB", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+    networks:
+      - miRed
+
+  redis-slave1:
+    image: redis:6
+    command: ["redis-server", "--port", "7001", "--slaveof", "redis", "6379"]
+    ports:
+      - "7001:7001"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+    networks:
+      - miRed
+
+  redis-slave2:
+    image: redis:6
+    command: ["redis-server", "--port", "7002", "--slaveof", "redis", "6379"]
+    ports:
+      - "7002:7002"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+    networks:
+      - miRed
+
+  worker:
+    build:
+      context: ./worker
+    depends_on:
+      kafka-broker-1:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    networks: 
+      - miRed
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-check-worker.sh"]
+      interval: 5s
+      timeout: 10s
+      retries: 3
+    volumes:
+      - ./health-check-worker.sh:/usr/local/bin/health-check-worker.sh
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - 2181:2181
+    networks:
+      - miRed
+  kafka-broker-1:
+    image: confluentinc/cp-kafka:latest
+    container_name: kafka-broker-1
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker-1:9092,PLAINTEXT_INTERNAL://kafka-broker-1:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      # Otras configuraciones de Kafka
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server=localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - miRed
+    volumes:
+      - ./create_topic.sh:/create_topic.sh
+    command: >
+      sh -c "/etc/confluent/docker/run &
+             /create_topic.sh &&
+             tail -f /dev/null"
+networks:
+  miRed:
