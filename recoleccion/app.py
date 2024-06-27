@@ -93,6 +93,8 @@ def get_recomendaciones(user_id):
                 break
             recomendacion = json.loads(rec)
             recomendaciones.append(recomendacion)
+        if not recomendaciones:
+            return jsonify({"message":f"no hay recomendaciones para este usuario  => (user_id))"})
         return jsonify(recomendaciones), 200
     except Exception as e:
         print(e)

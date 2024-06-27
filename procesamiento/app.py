@@ -192,13 +192,18 @@ def recomendar(user_id, cercanos, movies_filtro):
     resultados = []
     print("antes de pasar AL FOR ---------------------")
     print(movies_filtro)
+    df_movies = obtener_movies_de_redis()
 
-    for movie_id in recommended_movie_ids[:10]:# obtenemos el TOP 10 de VIDEOS
-        pelicula = next((movie for movie in movies_filtro if movie['idMovie'] == movie_id), None)
-        #obtenemos la infomracion de la pelicula
-        if pelicula:#si existe la pelicula dentro del dataset
+    for movie_id in recommended_movie_ids[:10]:
+        pelicula = df_movies[df_movies['movieId'] == str(movie_id)]
+        if not pelicula.empty:
+            pelicula_data = pelicula.iloc[0]  # Obtener la primera fila como una serie
             elemento = {
-                'id': pelicula['id']
+                'id': pelicula_data['id'],
+                'datos': {
+                    'movieId': pelicula_data['movieId'],
+                    'url': pelicula_data['url']
+                }
             }
             resultados.append(elemento)
 
@@ -304,10 +309,16 @@ def tamaño():
 @app.route("/recomendaciones/<user_id>", methods=["GET"])
 def recomendar_para_usuario(user_id):
     global df_visualizaciones
+
+    response = requests.get(f"{USUARIOS_API}/{user_id}")
+    
+    if response.status_code == 404:
+        return jsonify({"error": "Usuario no encontrado"}), 404
+
     visualizaciones_usuario = df_visualizaciones[df_visualizaciones['idUsuario'] == user_id].to_dict(orient='records')
     
     if len(visualizaciones_usuario) <= 3:
-        print("AQUI SE PROBARA LA SIMILTIDUD DEL COSENOcon ENFOCADA A LOS USUARIOS")
+        print("AQUI SE PROBARA LA SIMILTIDUD DEL COSENO CON ENFOCADA A LOS USUARIOS")
         resultados = coseno_categorias(user_id)
         for pelicula in resultados:
             redis_client_resultados.rpush(f"recomendaciones:{user_id}", json.dumps(pelicula))
@@ -316,7 +327,7 @@ def recomendar_para_usuario(user_id):
         start_time = time.time()
         resultados = knn_usuarios(user_id, df_visualizaciones)
         tiempo_ejecucion = time.time() - start_time
-        print("el tiempo de ejecucion de KNN-USUARIO ES " , tiempo_ejecucion)
+        print("el tiempo de ejecucion de KNN-USUARIO ES ", tiempo_ejecucion)
         for pelicula in resultados:
             redis_client_resultados.rpush(f"recomendaciones:{user_id}", json.dumps(pelicula))
         return jsonify(resultados=resultados, tiempo_ejecucion=tiempo_ejecucion), 200
